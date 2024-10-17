@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from random import shuffle,randint,choice,sample
 device = world.device
 config = world.config
-
+save_file_name = 'au' + '==' + str(config['au']) + ' ' +'dataset'+'=='+config['dataset']+'.pth'
 
 def next_batch_pairwise(dataset):
     batch_size = config['bpr_batch_size']
@@ -171,6 +171,7 @@ def early_stopping(recall,
             patience = 0
             print('[BEST]')
             best = recall + ndcg
+            torch.save(model.state_dict(), save_file_name)
             # torch.save(model.state_dict(),'./models/' + save_file_name)
         else:
             patience += 1
