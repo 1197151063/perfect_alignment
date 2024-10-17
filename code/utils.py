@@ -169,7 +169,7 @@ def early_stopping(recall,
     if patience < 50: 
         if recall + ndcg > best: 
             patience = 0
-            cprint('[BEST]')
+            print('[BEST]')
             best = recall + ndcg
             # torch.save(model.state_dict(),'./models/' + save_file_name)
         else:

@@ -541,9 +541,9 @@ class AlignGCN(RecModel):
         item_sim = F.cosine_similarity(items.unsqueeze(1), items.unsqueeze(0), dim=-1)        
         user_dist = user_dist + torch.eye(user_dist.size(0)).cuda() * 1e-6
         item_dist = item_dist + torch.eye(item_dist.size(0)).cuda() * 1e-6
-        user_sim = torch.clamp(user_sim, -1.0, 1.0)  # 对余弦相似度进行截断，保持在 [-1, 1] 范围内
+        user_sim = torch.clamp(user_sim, -1.0, 1.0)  
         user_dist = torch.clamp(user_dist, min=1e-6)
-        item_sim = torch.clamp(item_sim, -1.0, 1.0)  # 对余弦相似度进行截断，保持在 [-1, 1] 范围内
+        item_sim = torch.clamp(item_sim, -1.0, 1.0)  
         item_dist = torch.clamp(item_dist, min=1e-6)
         user_uniformity = torch.sum((1 - user_sim) / user_dist)
         item_uniformity = torch.sum((1 - item_sim) / item_dist)
@@ -556,8 +556,8 @@ class AlignGCN(RecModel):
     
     def norm(self,x):
         users,items = torch.split(x,[self.num_users,self.num_items])
-        users_norm = (1e-6 + users.pow(2).sum(dim=1).mean()).sqrt()
-        items_norm = (1e-6 + items.pow(2).sum(dim=1).mean()).sqrt()
+        users_norm = (1e-6 + users.pow(2).sum(dim=1).mean()) ** (1/2)
+        items_norm = (1e-6 + items.pow(2).sum(dim=1).mean()) ** (1/2)
         if users_norm < 1:
             users_norm = 1 
         if items_norm < 1:

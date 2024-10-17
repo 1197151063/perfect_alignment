@@ -57,6 +57,7 @@ config['beta'] = args.pruning
 config['ssl_tmp'] = args.ssl_tmp
 config['ssl_decay'] = args.ssl_decay
 config['epsilon'] = args.epsilon
+config['au'] = args.au
 GPU = torch.cuda.is_available()
 torch.cuda.set_device(args.gpu_id)
 device = torch.device('cuda' if GPU else "cpu")

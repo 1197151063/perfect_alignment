@@ -10,7 +10,12 @@ import random
 import utils
 import numpy as np
 from torch.utils.tensorboard.writer import SummaryWriter
-
+import sys
+import datetime
+current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+file_name = f"result_{current_time}.txt"
+file = open(file_name, "w")
+sys.stdout = file
 device = world.device
 config = world.config
 dataset = Loader()
@@ -27,11 +32,14 @@ opt = torch.optim.Adam(params=model.parameters(),lr=config['lr'])
 best = 0.
 patience = 0.
 max_score = 0.
+save_file_name = 'au' + '==' + str(config['au']) + ' ' +'dataset'+'=='+config['dataset']+'.pth'
 for epoch in range(1, 1001):
     loss = train_bpr_aligngcn(dataset=dataset,model=model,opt=opt)
     recall,ndcg = test([20],model,train_edge_index,test_edge_index,num_users)
     flag,best,patience = utils.early_stopping(recall[20],ndcg[20],best,patience,model)
     if flag == 1:
+        file.close()
+        torch.save(model.state_dict(), save_file_name)
         break
     print(f'Epoch: {epoch:03d}, {loss}, R@20: '
           f'{recall[20]:.4f},  '

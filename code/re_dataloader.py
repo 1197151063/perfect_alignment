@@ -8,7 +8,7 @@ from scipy.sparse import csr_matrix
 seed = world.seed
 import random
 import torch_geometric.utils as pyg_utils
-
+from tqdm import tqdm
 class BasicDataset(Dataset):
     def __init__(self):
         cprint('init dataset')
@@ -25,6 +25,7 @@ class BasicDataset(Dataset):
         raise NotImplementedError
     
 class Loader(BasicDataset):
+
     """
     Loading data from datasets
     supporting:['gowalla','amazon-book','yelp2018','lastfm']
@@ -45,7 +46,40 @@ class Loader(BasicDataset):
         trainItem = []
         valUser = []
         valItem = []
-
+        # tmp_train_user = []
+        # tmp_train_item = []
+        # tmp_test_user = []
+        # tmp_test_item = []
+        # with open(train_file) as f:
+        #     for l in f.readlines():
+        #         all = l.strip('\n').split(' ')
+        #         tmp_train_user.append(all[0])
+        #         tmp_train_item.append(all[1])
+        # with open(test_file) as f:
+        #     for l in f.readlines():
+        #         all = l.strip('\n').split(' ')
+        #         tmp_test_user.append(all[0])
+        #         tmp_test_item.append(all[1])
+        # tmp_train_user = np.array(tmp_train_user)
+        # tmp_train_item = np.array(tmp_train_item)
+        # u_idx = np.unique(tmp_train_user)
+        # res_train = []
+        # for i in tqdm(u_idx):
+        #     index = np.where(tmp_train_user==i)
+        #     res_train.append(np.concatenate((np.array([i]),tmp_train_item[index]),axis=0))
+        # with open("res_train.txt", "w") as f:
+        #     for row in res_train:
+        #         f.write(" ".join(map(str, row)) + "\n")
+        # tmp_test_user = np.array(tmp_test_user)
+        # tmp_test_item = np.array(tmp_test_item)
+        # u_idx = np.unique(tmp_test_user)
+        # res_test = []
+        # for i in tqdm(u_idx):
+        #     index = np.where(tmp_test_user==i)
+        #     res_test.append(np.concatenate((np.array([i]),tmp_test_item[index]),axis=0))
+        # with open("res_test.txt", "w") as f:
+        #     for row in res_test:
+        #         f.write(" ".join(map(str, row)) + "\n")
         with open(train_file) as f:
             for l in f.readlines():
                 if len(l) > 0:
