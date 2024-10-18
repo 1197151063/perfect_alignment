@@ -123,13 +123,14 @@ class Loader(BasicDataset):
         self.trainItem = np.array(trainItem)
         self.train_edge_index = train_edge_index
         self.edge_index = edge_index
-        self.n_user = len(np.unique(edge_index[0]))
-        self.n_item = len(np.unique(edge_index[1]))
+        self.n_user = edge_index[0].max() + 1
+        self.n_item = edge_index[0].max() + 1
+
         self.UserItemNet = csr_matrix((np.ones(len(self.train_edge_index[0])), (self.train_edge_index[0].numpy(), self.train_edge_index[1].numpy())),
                                       shape=(self.n_user, self.n_item))
         UserItemValid = csr_matrix((np.ones(len(val_edge_index[0])), (val_edge_index[0].numpy(), val_edge_index[1].numpy())),
                                       shape=(self.n_user, self.n_item))
-        #poisoning the training and validation set
+        # poisoning the training and validation set
         if config['add_noise'] == 1:
             graph = self.UserItemNet.toarray()
             graph_val = UserItemValid.toarray()
