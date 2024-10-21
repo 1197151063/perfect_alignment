@@ -5,7 +5,6 @@ import scipy.sparse as sp
 from torch_geometric.nn.aggr import Aggregation
 from gtn_propagation import GeneralPropagation
 from torch_geometric.nn.conv import MessagePassing
-from recbole.model.init import xavier_normal_initialization
 from torch_geometric.typing import SparseTensor
 from torch_sparse import SparseTensor,matmul
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
@@ -19,7 +18,6 @@ from tqdm import tqdm
 from torch_scatter import scatter,scatter_max,scatter_softmax,scatter_add
 config = world.config
 device = world.device
-import random
 """
 define Recmodels here:
 Already implemented : [MF-BPR,NGCF,LightGCN,DGCF,GTN,RGCF,Ours]
@@ -198,7 +196,6 @@ class NGCF(MessagePassing):
         self.GNNlayers = torch.nn.ModuleList()
         for i in range(self.K):
             self.GNNlayers.append(BiGNNLayer(self.weight_size[i],self.weight_size[i+1]))
-        self.apply(xavier_normal_initialization)
         world.cprint("NGCF will use normal distribution initilizer")
 
     
