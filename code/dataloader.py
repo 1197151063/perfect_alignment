@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import Dataset
 from world import cprint
 import world
 import torch
@@ -6,9 +6,6 @@ import numpy as np
 from torch_sparse import SparseTensor
 from scipy.sparse import csr_matrix
 seed = world.seed
-import random
-import torch_geometric.utils as pyg_utils
-from tqdm import tqdm
 class BasicDataset(Dataset):
     def __init__(self):
         cprint('init dataset')

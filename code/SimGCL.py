@@ -1,16 +1,10 @@
-from world import cprint,bprint
 import world
-from re_model import SimGCL,SGL
-from re_dataloader import Loader
+from NRGCF_Pytorch.code.model import SimGCL
+from NRGCF_Pytorch.code.dataloader import Loader
 import torch
-import numpy as np
-from re_procedure import train_bpr_sgl,test,Test,train_bpr_simgcl
-from torch_geometric.nn.conv.gcn_conv import gcn_norm
-import re_procedure
-import random 
+from NRGCF_Pytorch.code.procedure import test,train_bpr_simgcl
 import utils
-import numpy as np
-from torch_geometric.utils import dropout_edge
+
 device = world.device
 config = world.config
 dataset = Loader()

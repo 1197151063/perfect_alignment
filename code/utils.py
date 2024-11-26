@@ -2,11 +2,10 @@ import world
 import torch
 from sklearn.metrics import roc_auc_score
 import numpy as np
-from world import cprint
 from torch import LongTensor
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from random import shuffle,randint,choice,sample
+from random import shuffle,choice
 device = world.device
 config = world.config
 save_file_name = 'SGL' + '==' + str(config['au']) + ' ' +'dataset'+'=='+config['dataset'] + '_' + str(config['noise_rate'])+'.pth'
@@ -166,7 +165,7 @@ def early_stopping(recall,
                    best,
                    patience,
                    model):
-    if patience < 5: 
+    if patience < 50: 
         if recall + ndcg > best: 
             patience = 0
             print('[BEST]')

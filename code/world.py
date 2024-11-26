@@ -1,12 +1,8 @@
 import os
 from os.path import join
 import torch
-from enum import Enum
 from parse import parse_args
 import multiprocessing
-from torch_sparse import SparseTensor
-import random
-import numpy as np
 args = parse_args()
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
@@ -25,9 +21,6 @@ if not os.path.exists(FILE_PATH):
     os.makedirs(FILE_PATH, exist_ok=True)
 
 config = {}
-all_dataset = ['gowalla', 'yelp2018', 'amazon-book', 'last-fm']
-all_models = ['mf', 'gtn', 'lgn']
-# config['batch_size'] = 4096
 config['bpr_batch_size'] = args.bpr_batch
 config['latent_dim_rec'] = args.recdim
 config['K'] = args.K

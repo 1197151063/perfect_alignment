@@ -1,14 +1,9 @@
-from world import cprint,bprint
 import world
-from re_model import LightGCN
-from re_dataloader import Loader
+from NRGCF_Pytorch.code.model import LightGCN
+from NRGCF_Pytorch.code.dataloader import Loader
 import torch
-import numpy as np
-from re_procedure import train_bpr,test,Test
-import re_procedure
-import random 
+from NRGCF_Pytorch.code.procedure import train_bpr,test
 import utils
-import numpy as np
 
 device = world.device
 config = world.config

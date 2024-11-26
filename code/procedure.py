@@ -2,13 +2,11 @@ import torch
 from torch import Tensor
 import numpy as np
 from torch_geometric.utils import degree
-from torch_geometric.nn.conv.gcn_conv import gcn_norm
 import world
 import utils
-from utils import eval
-import re_model
+import NRGCF_Pytorch.code.model as model
 import multiprocessing
-from re_model import SGL,SimGCL,AlignGCN,LightGCN
+from NRGCF_Pytorch.code.model import SGL,SimGCL,CenNorm,LightGCN
 device = world.device
 config = world.config
 CORES = multiprocessing.cpu_count() // 2
@@ -33,31 +31,7 @@ def train_bpr(dataset,model:LightGCN,opt):
     aver_loss /= total_batch
     return f"average loss {aver_loss:5f}"
 
-def train_bpr_aligngcn(dataset,model:AlignGCN,opt):
-    # model = model
-    # model.train()
-    # S = utils.Sampling(dataset,dataset.allPos)
-    # users = torch.LongTensor(S[:,0]).to(device)
-    # posItems = torch.LongTensor(S[:,1]).to(device)
-    # negItems = torch.LongTensor(S[:,2]).to(device)
-    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    # aver_loss = 0.
-    # for (batch_i,
-    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
-    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
-    #     # pos_rank,neg_rank = model(edge_label_index)
-    #     # bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
-    #     align_loss = model.alignment_loss(edge_label_index)
-    #     uniformity_loss = model.uniformity_loss(edge_label_index)
-    #     loss = uniformity_loss + align_loss
-    #     opt.zero_grad()
-    #     loss.backward()
-    #     opt.step()
-    #     aver_loss += loss.cpu().item()
-    # aver_loss /= total_batch
-    # return f"average loss {aver_loss:5f}"
+def train_bpr_aligngcn(dataset,model:CenNorm,opt):
     model = model
     model.train()
     S = utils.Fast_Sampling(dataset=dataset)
@@ -81,22 +55,6 @@ def train_bpr_aligngcn(dataset,model:AlignGCN,opt):
     aver_uni_loss /= total_batch
     return f"loss:{aver_loss:.3f},alignment:{aver_align_loss:.3f},uniformity:{aver_uni_loss:.3f}"
 
-def train_bpr_nrgcf(dataset,model,opt):
-    model = model
-    model.train()
-    S = utils.Fast_Sampling(dataset=dataset)
-    aver_loss = 0.
-    total_batch = len(S)
-    for edge_label_index in S:
-        pos_rank,neg_rank = model(edge_label_index)
-        bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
-        loss = bpr_loss + reg_loss
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
-        aver_loss += loss.cpu().item()
-    aver_loss /= total_batch
-    return f"average loss {aver_loss:5f}"
 
 def train_bpr_sgl(dataset,
                   model:SGL,
@@ -120,28 +78,7 @@ def train_bpr_sgl(dataset,
         aver_loss += (bpr_loss + ssl_loss + L2_reg)
     aver_loss /= total_batch
     return f"average loss {aver_loss:5f}"
-    # S = utils.Sampling(dataset,dataset.allPos)
-    # users = torch.LongTensor(S[:,0]).to(device)
-    # posItems = torch.LongTensor(S[:,1]).to(device)
-    # negItems = torch.LongTensor(S[:,2]).to(device)
-    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    # aver_loss = 0.
-    # for (batch_i,
-    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
-    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
-    #     pos_rank,neg_rank = model(edge_label_index)
-    #     bpr_loss = model.bpr_loss(pos_rank,neg_rank)
-    #     ssl_loss = model.ssl_loss(edge_index1,edge_index2,edge_label_index)
-    #     L2_reg = model.L2_reg(edge_label_index)
-    #     loss = bpr_loss + ssl_loss + L2_reg
-    #     opt.zero_grad()
-    #     loss.backward()
-    #     opt.step()
-    #     aver_loss += (bpr_loss + ssl_loss + L2_reg)
-    # aver_loss /= total_batch
-    # return f"average loss {aver_loss:5f}"
+
 
 def train_bpr_simgcl(dataset,
                   model:SimGCL,
@@ -163,28 +100,7 @@ def train_bpr_simgcl(dataset,
         aver_loss += (bpr_loss + ssl_loss + L2_reg)
     aver_loss /= total_batch
     return f"average loss {aver_loss:5f}"
-    # S = utils.Sampling(dataset,dataset.allPos)
-    # users = torch.LongTensor(S[:,0]).to(device)
-    # posItems = torch.LongTensor(S[:,1]).to(device)
-    # negItems = torch.LongTensor(S[:,2]).to(device)
-    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    # aver_loss = 0.
-    # for (batch_i,
-    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
-    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
-    #     pos_rank,neg_rank = model(edge_label_index)
-    #     bpr_loss = model.bpr_loss(pos_rank,neg_rank)
-    #     ssl_loss = model.ssl_loss(edge_label_index)
-    #     L2_reg = model.L2_reg(edge_label_index)
-    #     loss = bpr_loss + ssl_loss + L2_reg
-    #     opt.zero_grad()
-    #     loss.backward()
-    #     opt.step()
-    #     aver_loss += (bpr_loss + ssl_loss + L2_reg)
-    # aver_loss /= total_batch
-    # return f"average loss {aver_loss:5f}"
+
 
 @torch.no_grad()
 def test(k_values:list,
@@ -237,135 +153,6 @@ def test(k_values:list,
     ndcg = {k: ndcg[k] / total_examples for k in k_values}
 
     return recall,ndcg
-def BPR_train_MF(dataset,Recmodel,loss_class):
-    Recmodel = Recmodel
-    Recmodel.train()
-    bpr:utils.BPRLoss_MF = loss_class
-    with timer(name="Sample"):
-        S = utils.UniformSample_original(dataset)
-    users = torch.LongTensor(S[:,0])
-    posItems = torch.LongTensor(S[:,1])
-    negItems = torch.LongTensor(S[:,2])
-    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
-    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    aver_loss = 0.
-    for (batch_i,
-         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
-        aver_loss += cri
-    aver_loss /= total_batch
-    time_info = timer.dict()
-    timer.zero()
-    return f"average loss {aver_loss} -- {time_info}"
-
-def BPR_train_NeuCF(dataset,Recmodel,loss_class):
-    Recmodel = Recmodel
-    Recmodel.train()
-    bpr:utils.BCELoss = loss_class
-    with timer(name="Sample"):
-        S = utils.UniformSample_original(dataset)
-    users = torch.LongTensor(S[:,0])
-    posItems = torch.LongTensor(S[:,1])
-    negItems = torch.LongTensor(S[:,2])
-    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
-    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    aver_loss = 0.
-    for (batch_i,
-         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
-        aver_loss += cri
-    aver_loss /= total_batch
-    time_info = timer.dict()
-    timer.zero()
-    return f"average loss {aver_loss} -- {time_info}"
-
-def BPR_train_RGCF(dataset,Recmodel,loss_class):
-    Recmodel = Recmodel
-    Recmodel.train()
-    bpr:utils.BPRLoss_RGCF = loss_class
-    with timer(name="Sample"):
-        S = utils.UniformSample_original(dataset)
-    users = torch.LongTensor(S[:,0])
-    posItems = torch.LongTensor(S[:,1])
-    negItems = torch.LongTensor(S[:,2])
-    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
-    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
-    aver_loss = 0.
-    for (batch_i,
-         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
-        aver_loss += cri
-    aver_loss /= total_batch
-    time_info = timer.dict()
-    timer.zero()
-    return f"average loss {aver_loss} -- {time_info}"
-
-
-
-def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
-    Recmodel = recommend_model
-    Recmodel.train()
-    bpr:utils.BPRLoss1 = loss_class
-    
-    with timer(name="Sample"):
-        S = utils.UniformSample_original(dataset)
-    users = torch.Tensor(S[:, 0]).long()
-    posItems = torch.Tensor(S[:, 1]).long()
-    negItems = torch.Tensor(S[:, 2]).long()
-
-    users = users.to(world.device)
-    posItems = posItems.to(world.device)
-    negItems = negItems.to(world.device)
-    users, posItems, negItems = utils.shuffle(users, posItems, negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1
-    aver_loss = 0.
-    for (batch_i,
-         (batch_users,
-          batch_pos,
-          batch_neg)) in enumerate(utils.minibatch(users,
-                                                   posItems,
-                                                   negItems,
-                                                   batch_size=world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_users, batch_pos, batch_neg)
-        aver_loss += cri
-        # if world.tensorboard:
-        #     w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
-    aver_loss = aver_loss / total_batch
-    time_info = timer.dict()
-    timer.zero()
-    return aver_loss , f"loss {aver_loss:.3f}-{time_info}"
-
-def trainer(dataset,rec_model,loss,epoch):
-    model = rec_model
-    model.train()
-    bpr:utils.BPRLoss1 = loss
-    S = utils.sampling(dataset)
-    users = S[0].long()
-    pos_items = S[1].long()
-    neg_items = S[2].long()
-    users = users.to(world.device)
-    pos_items = pos_items.to(world.device)
-    neg_items = neg_items.to(world.device)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1
-    for (batch_i,
-         (batch_users,
-          batch_pos,
-          batch_neg)) in enumerate(utils.minibatch(users,
-                                                   pos_items,
-                                                   neg_items,
-                                                   batch_size=world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_users, batch_pos, batch_neg)
-        aver_loss += cri
-        # if world.tensorboard:
-        #     w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
-    aver_loss = aver_loss / total_batch
-    return aver_loss , f"loss {aver_loss:.6f}"
 
 def test_one_batch(X):
     sorted_items = X[0].numpy()
@@ -388,7 +175,7 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=1, val=False):
     testDict: dict = dataset.testDict
     valDict: dict = dataset.valDict
 
-    Recmodel: re_model.LightGCN
+    Recmodel: model.LightGCN
     Recmodel = Recmodel.eval()
     max_K = max(world.topks)
     if multicore == 1:
@@ -467,7 +254,7 @@ def Valid(dataset, Recmodel, epoch, w=None, multicore=1, val=False):
     # testDict: dict = dataset.testDict
     valDict: dict = dataset.valDict
 
-    Recmodel: re_model.LightGCN
+    Recmodel: model.LightGCN
     Recmodel = Recmodel.eval()
     max_K = max(world.topks)
     if multicore == 1:
@@ -562,7 +349,6 @@ def get_user_positive_items(edge_index):
         user_pos_items[user].append(item)
     return user_pos_items
 
-def get_metrics(model,edge_index,exclude_edge_index,k):
     # user_embedding = np.array(model.user_emb.weight.cpu().detach().numpy())
     # item_embedding = np.array(model.item_emb.weight.cpu().detach().numpy())
     # rating = torch.tensor(np.matmul(user_embedding,item_embedding.T))

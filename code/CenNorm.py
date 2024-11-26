@@ -1,18 +1,9 @@
-from world import cprint,bprint
 import world
-from re_model import AlignGCN
-from re_dataloader import Loader
+from NRGCF_Pytorch.code.model import CenNorm
+from NRGCF_Pytorch.code.dataloader import Loader
 import torch
-import numpy as np
-from re_procedure import train_bpr,test,Test,train_bpr_aligngcn
-import re_procedure
-import random 
+from NRGCF_Pytorch.code.procedure import test,train_bpr_aligngcn
 import utils
-import numpy as np
-from torch.utils.tensorboard.writer import SummaryWriter
-import sys
-import datetime
-current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 device = world.device
 config = world.config
 dataset = Loader()
@@ -21,7 +12,7 @@ train_edge_index = dataset.train_edge_index.to(device)
 test_edge_index = dataset.test_edge_index.to(device)
 num_users = dataset.num_users
 num_items = dataset.num_items
-model = AlignGCN(num_users=num_users,
+model = CenNorm(num_users=num_users,
                  num_items=num_items,
                  edge_index=train_edge_index,
                  config=config).to(device)

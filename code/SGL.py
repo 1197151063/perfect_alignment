@@ -1,15 +1,10 @@
-from world import cprint,bprint
 import world
-from re_model import SGL
-from re_dataloader import Loader
+from NRGCF_Pytorch.code.model import SGL
+from NRGCF_Pytorch.code.dataloader import Loader
 import torch
-import numpy as np
-from re_procedure import train_bpr_sgl,test,Test
+from NRGCF_Pytorch.code.procedure import train_bpr_sgl,test
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
-import re_procedure
-import random 
 import utils
-import numpy as np
 from torch_geometric.utils import dropout_edge
 utils.set_seed(42)
 device = world.device
