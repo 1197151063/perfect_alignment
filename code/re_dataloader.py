@@ -124,7 +124,7 @@ class Loader(BasicDataset):
         self.train_edge_index = train_edge_index
         self.edge_index = edge_index
         self.n_user = edge_index[0].max() + 1
-        self.n_item = edge_index[0].max() + 1
+        self.n_item = edge_index[1].max() + 1
 
         self.UserItemNet = csr_matrix((np.ones(len(self.train_edge_index[0])), (self.train_edge_index[0].numpy(), self.train_edge_index[1].numpy())),
                                       shape=(self.n_user, self.n_item))

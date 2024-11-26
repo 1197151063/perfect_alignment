@@ -76,5 +76,6 @@ def parse_args():
 
     parser.add_argument('--model',type=str,default='LightGCN',help='using which GCN model')
 
-    parser.add_argument('--au',type=float,default=1.0,help='using which GCN model')
+    parser.add_argument('--au',type=float,default=1.0,help='uniformity')
+    parser.add_argument('--r',type=float,default=0.5)
     return parser.parse_args()

@@ -411,6 +411,7 @@ class AlignGCN(RecModel):
         self.edge_index = gcn_norm(edge_index)
         self.alpha= 1./ (1 + self.K)
         self.au = config['au']
+        self.r = config['r']
         if isinstance(self.alpha, Tensor):
             assert self.alpha.size(0) == self.K + 1
         else:
@@ -425,127 +426,27 @@ class AlignGCN(RecModel):
         out = x * self.alpha[0]
         for i in range(self.K):
             x = self.propagate(edge_index=self.edge_index,x=x)
-            out = out + x * self.alpha[i + 1]
-        return out
-    
-    def get_embedding_pure(self):
-        x_u=self.user_emb.weight
-        x_i=self.item_emb.weight
-        x=torch.cat([x_u,x_i])
-        return x
-    
-    def get_embedding_norm(self):
-        x_u=self.user_emb.weight
-        x_i=self.item_emb.weight
-        x=torch.cat([x_u,x_i])
-        out = x * self.alpha[0]
-        for i in range(self.K):
-            x = self.propagate(edge_index=self.edge_index,x=x)
             x = self.norm(x)
             out = out + x * self.alpha[i + 1]
         return out
     
-    def get_embedding_wo_1layer(self):
-        x_u=self.user_emb.weight
-        x_i=self.item_emb.weight
-        x=torch.cat([x_u,x_i])
-        out = x * 0
-        for i in range(self.K):
-            x = self.propagate(edge_index=self.edge_index,x=x)
-            out = out + x * self.alpha[i]
-        return out 
-
-    def get_embedding_wo_1layer_norm(self):
-        x_u=self.user_emb.weight
-        x_i=self.item_emb.weight
-        x=torch.cat([x_u,x_i])
-        out = x * 0
-        for i in range(self.K):
-            x = self.propagate(edge_index=self.edge_index,x=x)
-            x = self.norm(x)
-            out = out + x * self.alpha[i]
-        return out 
-
     def alignment(self,x, y):
         x, y = F.normalize(x, dim=-1), F.normalize(y, dim=-1)
         return (x - y).norm(dim=1).pow(2).mean()
 
     def alignment_loss(self,edge_label_index):
-        out = self.get_embedding_norm()
+        out = self.get_embedding()
         x_u,x_i = torch.split(out,[self.num_users,self.num_items])
         batch_x_u,batch_x_i = x_u[edge_label_index[0]],x_i[edge_label_index[1]]
         return self.alignment(batch_x_u,batch_x_i)
     
     def uniformity_loss(self,edge_label_index):
-        out = self.get_embedding_norm()
+        out = self.get_embedding()
         x_u,x_i = torch.split(out,[self.num_users,self.num_items])
         u_idx = torch.unique(edge_label_index[0])
         i_idx = torch.unique(torch.cat([edge_label_index[1],edge_label_index[2]]))
         batch_x_u,batch_x_i = x_u[u_idx],x_i[i_idx]
         return  self.au * (self.uniformity(batch_x_u) + self.uniformity(batch_x_i))
-
-    def pair_align(self,edge_label_index):
-        out = self.get_embedding()
-        x_u,x_i = torch.split(out,[self.num_users,self.num_items])
-        users = x_u[edge_label_index[0]]
-        items = x_i[edge_label_index[1]]
-        dot_product = torch.sum(users * items, dim=-1)
-        sigmoid_scores = torch.sigmoid(dot_product)
-        log_loss = -torch.log(sigmoid_scores + 1e-8)
-        return log_loss.sum()
-
-    def entropy_based_uniformity(self,x):
-        x = F.normalize(x, dim=-1)
-        dist_matrix = torch.cdist(x, x, p=2)
-        p_dist = torch.exp(-dist_matrix)
-        entropy = -torch.mean(p_dist * torch.log(p_dist + 1e-8))
-        return entropy
-    
-    def pair_entropy(self,edge_label_index):
-        out = self.get_embedding()
-        x_u,x_i = torch.split(out,[self.num_users,self.num_items])
-        users = x_u[edge_label_index[0]]
-        items = x_i[edge_label_index[1]]
-        user_u = self.entropy_based_uniformity(users)
-        item_u = self.entropy_based_uniformity(items)
-        return 15000 * (user_u + item_u)
-    def contrastive_uniformity(self,x, temperature=0.5):
-        # 归一化
-        x = F.normalize(x, dim=-1)
-        
-        # 计算pairwise相似度（内积）
-        similarity_matrix = torch.matmul(x, x.t()) / temperature
-        
-        # 计算对比学习损失
-        logits = torch.exp(similarity_matrix)
-        loss = -torch.log(logits / torch.sum(logits, dim=-1, keepdim=True) + 1e-8).mean()
-        
-        return loss
-    def pair_contrast(self,edge_label_index):
-        out = self.get_embedding()
-        x_u,x_i = torch.split(out,[self.num_users,self.num_items])
-        users = x_u[edge_label_index[0]]
-        items = x_i[edge_label_index[1]]
-        return self.contrastive_uniformity(users) + self.contrastive_uniformity(items)     
-    def pair_norm(self,edge_label_index):
-        out = self.get_embedding()
-        x_u,x_i = torch.split(out,[self.num_users,self.num_items])
-        users = x_u[edge_label_index[0]]
-        items = x_i[edge_label_index[1]]
-        user_dist = torch.cdist(users, users, p=2)  
-        user_sim = F.cosine_similarity(users.unsqueeze(1), users.unsqueeze(0), dim=-1)
-        item_dist = torch.cdist(items, items, p=2)  
-        item_sim = F.cosine_similarity(items.unsqueeze(1), items.unsqueeze(0), dim=-1)        
-        user_dist = user_dist + torch.eye(user_dist.size(0)).cuda() * 1e-6
-        item_dist = item_dist + torch.eye(item_dist.size(0)).cuda() * 1e-6
-        user_sim = torch.clamp(user_sim, -1.0, 1.0)  
-        user_dist = torch.clamp(user_dist, min=1e-6)
-        item_sim = torch.clamp(item_sim, -1.0, 1.0)  
-        item_dist = torch.clamp(item_dist, min=1e-6)
-        user_uniformity = torch.sum((1 - user_sim) / user_dist)
-        item_uniformity = torch.sum((1 - item_sim) / item_dist)
-        uniformity_loss = 2 * user_uniformity + 2 * item_uniformity
-        return uniformity_loss
 
     def uniformity(self,x, t=2):
         x = F.normalize(x, dim=-1)
@@ -553,85 +454,16 @@ class AlignGCN(RecModel):
     
     def norm(self,x):
         users,items = torch.split(x,[self.num_users,self.num_items])
-        users_norm = (1e-6 + users.pow(2).sum(dim=1).mean()) ** (1/2)
-        items_norm = (1e-6 + items.pow(2).sum(dim=1).mean()) ** (1/2)
-        if users_norm < 1:
-            users_norm = 1 
-        if items_norm < 1:
-            items_norm = 1
+        users_norm = torch.clamp(1e-6 + users.pow(2).sum(dim=1).mean(), 1)
+        items_norm = torch.clamp(1e-6 + items.pow(2).sum(dim=1).mean(), 1)
+        users_norm = users_norm ** self.r
+        items_norm = items_norm ** self.r
         users = users / (items_norm)
         items = items / (users_norm)
         x = torch.cat([users,items])
         return x
 
-    def get_shuffle_embedding(self):
-        x_u=self.user_emb.weight
-        x_i=self.item_emb.weight
-        x=torch.cat([x_u,x_i])
-        out = [x]
-        for i in range(self.K):
-            x = self.propagate(edge_index=self.edge_index,x=x)
-            r_noise = torch.rand_like(x).cuda()
-            x = x + torch.sign(x) * F.normalize(r_noise,dim=-1) * 0.1
-            out.append(x)
-        out = torch.stack(out,dim=1)
-        out = torch.mean(out,dim=1)
-        return out
-    
-    def cal_minimum_loss(self,edge_label_index):
-        out = self.get_embedding()
-        out_aug = self.get_shuffle_embedding()
-        users,items = torch.split(out,[self.num_users,self.num_items])
-        user_emb = users[edge_label_index[0]]
-        item_pos = items[edge_label_index[1]]
-        alignment_loss = self.alignment(user_emb,item_pos)
-        alignment_ui = self.alignment(out,out_aug)
-        align = max(alignment_loss - alignment_ui + 0.2,0)
-        return align
 
-    def intra_aggregation(self,x,y):
-        x = F.normalize(x,dim=-1)
-        y = F.normalize(y,dim=-1)
-        cos_sim = F.cosine_similarity(x,y)
-        return (1-cos_sim).mean()
-    
-    def seperation_loss(self,x):
-        x = F.normalize(x,dim=-1)
-        x_c = x.mean()
-        cos_sim = F.cosine_similarity(x,x_c)
-        return -cos_sim.mean()
-
-    def intra_and_seperation(self,edge_label_index):
-        out = self.get_embedding()
-        user_emb,item_emb = torch.split(out,[self.num_users,self.num_items])
-        users,items = user_emb[edge_label_index[0]],item_emb[edge_label_index[1]]
-        alignment_loss = self.intra_aggregation(users,items)
-        seperation_loss = self.seperation_loss(users) + self.seperation_loss(items)
-        return alignment_loss,seperation_loss
-
-    
-    def instance_loss(self,edge_label_index):
-        out = self.get_embedding()
-        users,items = torch.split(out,[self.num_users,self.num_items])
-        user_emb = users[edge_label_index[0]]
-        item_pos = items[edge_label_index[1]]
-        item_neg = items[edge_label_index[2]]
-        return ((user_emb * item_pos).sum(dim=-1) - (user_emb * item_neg).sum(dim=-1)).sigmoid()
-    
-    def decorelation_loss(self,x):
-        size, dim = x.size()
-        x = x - x.mean(dim=0, keepdim=True)
-        cov = (x.T @ x) / (size - 1)
-        diag = torch.eye(dim, device=x.device)
-        cov_diff = cov - diag
-        return torch.norm(cov_diff, p='fro') ** 2
-    
-    def cal_decorelation_loss(self,edge_label_index):
-        out = self.get_embedding_norm()
-        users = torch.unique(edge_label_index[0])
-        items = torch.unique(torch.cat([edge_label_index[1],edge_label_index[2]]))
-        out = torch.cat([out[users],out[items + self.num_users]])
-        return self.decorelation_loss(out) * 0.01
     
 class NR_GCF(RecModel):
     def __init__(self,

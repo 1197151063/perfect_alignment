@@ -8,7 +8,7 @@ import utils
 from utils import eval
 import re_model
 import multiprocessing
-from re_model import SGL,SimGCL,AlignGCN
+from re_model import SGL,SimGCL,AlignGCN,LightGCN
 device = world.device
 config = world.config
 CORES = multiprocessing.cpu_count() // 2
@@ -16,28 +16,20 @@ CORES = multiprocessing.cpu_count() // 2
 define evaluation metrics here
 Already implemented:[Recall@K,NDCG@K]
 """
-def train_bpr(dataset,model:AlignGCN,opt):
+def train_bpr(dataset,model:LightGCN,opt):
     model = model
     model.train()
-    S = utils.Sampling(dataset,dataset.allPos)
-    users = torch.LongTensor(S[:,0]).to(device)
-    posItems = torch.LongTensor(S[:,1]).to(device)
-    negItems = torch.LongTensor(S[:,2]).to(device)
-    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    S = utils.Fast_Sampling(dataset=dataset)
     aver_loss = 0.
-    for (batch_i,
-         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
-             users,posItems,negItems,batch_size = config['bpr_batch_size'])):
-        edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
+    total_batch = len(S)
+    for edge_label_index in S:
         pos_rank,neg_rank = model(edge_label_index)
         bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
-        align_loss = model.multi_layer_align()
-        loss = bpr_loss + reg_loss + align_loss
+        loss = bpr_loss + reg_loss
         opt.zero_grad()
         loss.backward()
-        opt.step()
-        aver_loss += loss.cpu().item()
+        opt.step()   
+        aver_loss += (loss)
     aver_loss /= total_batch
     return f"average loss {aver_loss:5f}"
 

@@ -13,9 +13,6 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import sys
 import datetime
 current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-file_name = f"result_{current_time}.txt"
-file = open(file_name, "w")
-sys.stdout = file
 device = world.device
 config = world.config
 dataset = Loader()
@@ -38,7 +35,7 @@ for epoch in range(1, 1001):
     recall,ndcg = test([20],model,train_edge_index,test_edge_index,num_users)
     flag,best,patience = utils.early_stopping(recall[20],ndcg[20],best,patience,model)
     if flag == 1:
-        file.close()
+        # file.close()
         break
     print(f'Epoch: {epoch:03d}, {loss}, R@20: '
           f'{recall[20]:.4f},  '
