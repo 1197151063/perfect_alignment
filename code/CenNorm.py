@@ -1,5 +1,5 @@
 import world
-import CenNorm
+from model import CenNorm
 from dataloader import Loader
 import torch
 from procedure import test,train_bpr_aligngcn

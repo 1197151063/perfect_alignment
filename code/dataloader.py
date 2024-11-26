@@ -43,40 +43,7 @@ class Loader(BasicDataset):
         trainItem = []
         valUser = []
         valItem = []
-        # tmp_train_user = []
-        # tmp_train_item = []
-        # tmp_test_user = []
-        # tmp_test_item = []
-        # with open(train_file) as f:
-        #     for l in f.readlines():
-        #         all = l.strip('\n').split(' ')
-        #         tmp_train_user.append(all[0])
-        #         tmp_train_item.append(all[1])
-        # with open(test_file) as f:
-        #     for l in f.readlines():
-        #         all = l.strip('\n').split(' ')
-        #         tmp_test_user.append(all[0])
-        #         tmp_test_item.append(all[1])
-        # tmp_train_user = np.array(tmp_train_user)
-        # tmp_train_item = np.array(tmp_train_item)
-        # u_idx = np.unique(tmp_train_user)
-        # res_train = []
-        # for i in tqdm(u_idx):
-        #     index = np.where(tmp_train_user==i)
-        #     res_train.append(np.concatenate((np.array([i]),tmp_train_item[index]),axis=0))
-        # with open("res_train.txt", "w") as f:
-        #     for row in res_train:
-        #         f.write(" ".join(map(str, row)) + "\n")
-        # tmp_test_user = np.array(tmp_test_user)
-        # tmp_test_item = np.array(tmp_test_item)
-        # u_idx = np.unique(tmp_test_user)
-        # res_test = []
-        # for i in tqdm(u_idx):
-        #     index = np.where(tmp_test_user==i)
-        #     res_test.append(np.concatenate((np.array([i]),tmp_test_item[index]),axis=0))
-        # with open("res_test.txt", "w") as f:
-        #     for row in res_test:
-        #         f.write(" ".join(map(str, row)) + "\n")
+       
         with open(train_file) as f:
             for l in f.readlines():
                 if len(l) > 0:
@@ -122,63 +89,13 @@ class Loader(BasicDataset):
         self.edge_index = edge_index
         self.n_user = edge_index[0].max() + 1
         self.n_item = edge_index[1].max() + 1
-
         self.UserItemNet = csr_matrix((np.ones(len(self.train_edge_index[0])), (self.train_edge_index[0].numpy(), self.train_edge_index[1].numpy())),
                                       shape=(self.n_user, self.n_item))
         UserItemValid = csr_matrix((np.ones(len(val_edge_index[0])), (val_edge_index[0].numpy(), val_edge_index[1].numpy())),
                                       shape=(self.n_user, self.n_item))
-        # poisoning the training and validation set
-        if config['add_noise'] == 1:
-            graph = self.UserItemNet.toarray()
-            graph_val = UserItemValid.toarray()
-            nr = config['noise_rate']
-            cprint(f'adding noise at noise rate {nr}')
-            for user in range(self.n_user):
-                maxlen = int(nr * graph[user][graph[user]==1].size) + 1
-                zero_ind = np.where(graph[user]==0)
-                one_ind = np.where(graph[user]==1)
-                sample_zero = np.random.choice(zero_ind[0],maxlen,replace=False)
-                sample_one = np.random.choice(one_ind[0],maxlen,replace=False)
-                graph[user][sample_zero] = 1
-                graph[user][sample_one] = 0
-
-            for user in range(self.n_user):
-                maxlen = int(nr * graph_val[user][graph_val[user]==1].size) + 1
-                zero_ind = np.where(graph_val[user]==0)
-                one_ind = np.where(graph_val[user]==1)
-                if len(one_ind) == 0:
-                    continue
-                else:
-                    sample_zero = np.random.choice(zero_ind[0],maxlen,replace=False)
-                    sample_one = np.random.choice(one_ind[0],maxlen,replace=False)
-                    graph_val[user][sample_zero] = 1
-                    graph_val[user][sample_one] = 0
-
-
-            self.UserItemNet = csr_matrix(graph)
-            row_indices, col_indices = self.UserItemNet.nonzero()
-            self.train_edge_index = torch.tensor([row_indices, col_indices], dtype=torch.long,device=world.device)
-            UserItemValid = csr_matrix(graph_val).tocoo()
-            self.valUser = UserItemValid.row
-            self.valItem = UserItemValid.col
-        '''
-        the User-Item bipartite graph is modified
-        rebuild the train_edge_index
-        '''
-        """
-        build all positive dict to boost negative sampling
-        """
 
         self._allPos = self.getUserPosItems(list(range(self.n_user)))
         self.test_edge_index = test_edge_index
-
-        # self.train_loader=DataLoader(self.train_edge_index.size(1),
-        #                              batch_size=4096,
-        #                              shuffle=True)
-        # self.test_loader=DataLoader(list(range(self.num_users)),
-        #                             batch_size=config['testbatch'],
-        #                             shuffle=False,
-        #                             num_workers=4)
         self.__testDict = self.__build_test()
         self.__valDict = self.__build_val()
         print(f"{world.dataset} is ready to go")

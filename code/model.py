@@ -93,32 +93,6 @@ class RecModel(MessagePassing):
     def message_and_aggregate(self, adj_t: SparseTensor, x: Tensor) -> Tensor:
         return matmul(adj_t,x)
     
-
-    r"""Propagate a layer of Bi-interaction GNN
-
-    .. math::
-        output = (L+I)EW_1 + LE \otimes EW_2
-    """
-
-    def __init__(self, in_dim, out_dim):
-        super(BiGNNLayer, self).__init__()
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.linear = torch.nn.Linear(in_features=in_dim, out_features=out_dim)
-        self.interActTransform = torch.nn.Linear(
-            in_features=in_dim, out_features=out_dim
-        )
-
-    def forward(self, lap_matrix, features):
-        # for GCF ajdMat is a (N+M) by (N+M) mat
-
-        x = matmul(lap_matrix, features)
-
-        inter_part1 = self.linear(features + x)
-        inter_feature = torch.mul(x, features)
-        inter_part2 = self.interActTransform(inter_feature)
-
-        return inter_part1 + inter_part2
     
 class MF(nn.Module):
     def __init__(self,num_users,num_items,config=config):
