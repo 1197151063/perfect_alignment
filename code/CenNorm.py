@@ -1,8 +1,8 @@
 import world
-from NRGCF_Pytorch.code.model import CenNorm
-from NRGCF_Pytorch.code.dataloader import Loader
+import CenNorm
+from dataloader import Loader
 import torch
-from NRGCF_Pytorch.code.procedure import test,train_bpr_aligngcn
+from procedure import test,train_bpr_aligngcn
 import utils
 device = world.device
 config = world.config

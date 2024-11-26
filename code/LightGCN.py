@@ -1,8 +1,8 @@
 import world
-from NRGCF_Pytorch.code.model import LightGCN
-from NRGCF_Pytorch.code.dataloader import Loader
+from model import LightGCN
+from dataloader import Loader
 import torch
-from NRGCF_Pytorch.code.procedure import train_bpr,test
+from procedure import train_bpr,test
 import utils
 
 device = world.device

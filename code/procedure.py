@@ -4,9 +4,9 @@ import numpy as np
 from torch_geometric.utils import degree
 import world
 import utils
-import NRGCF_Pytorch.code.model as model
 import multiprocessing
-from NRGCF_Pytorch.code.model import SGL,SimGCL,CenNorm,LightGCN
+import model
+from model import SGL,SimGCL,CenNorm,LightGCN
 device = world.device
 config = world.config
 CORES = multiprocessing.cpu_count() // 2

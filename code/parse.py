@@ -1,13 +1,3 @@
-'''
-## GTN-pytorch
-"Graph Trend Filtering Networks for Recommendations", Accepted by SIGIR'2022.
-Pytorch Implementation of GTN in Graph Trend Networks for Recommendations
-The original version of this code base was from LightGCN-pytorch: https://github.com/gusye1234/LightGCN-PyTorch
-
-'''
-
-
-
 import argparse
 
 
