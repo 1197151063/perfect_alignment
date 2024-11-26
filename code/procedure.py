@@ -1,155 +1,599 @@
-import common
-import numpy as np
 import torch
-from dataloader import Loader
-from utils import BPR
-from model import LightGCN
-import torch_geometric.utils as pyg_utils
-args = common.args
-device = common.device
-batch_size = args.bpr_batch
-def trainer(dataset:Loader,rec_model,loss:BPR):
-    train_loader = dataset.train_loader
-    train_edge_index = dataset.train_edge_index.to(device)
-    edge_index = dataset.edge_index.to(device)
-    batches = len(train_loader.dataset) // args.bpr_batch
-    if len(train_loader.dataset) % args.bpr_batch != 0:
-        batches += 1
-    rec_model = rec_model
-    loss = loss
-    rec_loss = 0
-    for index in train_loader:
-        pos = train_edge_index[:,index]
-        all_interacted = dataset.get_user_all_interacted(pos[0])
-        while True:
-            neg = np.random.randint(0,dataset.num_items,size=len(pos[0]))
-            if neg in all_interacted:
-                 continue
-            else:
-                 break
-        neg = torch.from_numpy(neg).to(device)
-        users = pos[0].to(device)
-        pos = pos[1].to(device)
-        # neg = neg.to(device)
-        bpr_loss = loss.stageOne(users,pos,neg)
-        rec_loss += bpr_loss
-    rec_loss /= batches
-    return f"loss {rec_loss:.5f}"
+from torch import Tensor
+import numpy as np
+from torch_geometric.utils import degree
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+import world
+import utils
+from utils import eval
+import re_model
+import multiprocessing
+from re_model import SGL,SimGCL,AlignGCN,LightGCN
+device = world.device
+config = world.config
+CORES = multiprocessing.cpu_count() // 2
+"""
+define evaluation metrics here
+Already implemented:[Recall@K,NDCG@K]
+"""
+def train_bpr(dataset,model:LightGCN,opt):
+    model = model
+    model.train()
+    S = utils.Fast_Sampling(dataset=dataset)
+    aver_loss = 0.
+    total_batch = len(S)
+    for edge_label_index in S:
+        pos_rank,neg_rank = model(edge_label_index)
+        bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
+        loss = bpr_loss + reg_loss
+        opt.zero_grad()
+        loss.backward()
+        opt.step()   
+        aver_loss += (loss)
+    aver_loss /= total_batch
+    return f"average loss {aver_loss:5f}"
+
+def train_bpr_aligngcn(dataset,model:AlignGCN,opt):
+    # model = model
+    # model.train()
+    # S = utils.Sampling(dataset,dataset.allPos)
+    # users = torch.LongTensor(S[:,0]).to(device)
+    # posItems = torch.LongTensor(S[:,1]).to(device)
+    # negItems = torch.LongTensor(S[:,2]).to(device)
+    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    # aver_loss = 0.
+    # for (batch_i,
+    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
+    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
+    #     # pos_rank,neg_rank = model(edge_label_index)
+    #     # bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
+    #     align_loss = model.alignment_loss(edge_label_index)
+    #     uniformity_loss = model.uniformity_loss(edge_label_index)
+    #     loss = uniformity_loss + align_loss
+    #     opt.zero_grad()
+    #     loss.backward()
+    #     opt.step()
+    #     aver_loss += loss.cpu().item()
+    # aver_loss /= total_batch
+    # return f"average loss {aver_loss:5f}"
+    model = model
+    model.train()
+    S = utils.Fast_Sampling(dataset=dataset)
+    aver_loss = 0.
+    aver_align_loss = 0.
+    aver_uni_loss = 0.
+    total_batch = len(S)
+    for edge_label_index in S:
+        alignment_loss = model.alignment_loss(edge_label_index)
+        uniformity_loss = model.uniformity_loss(edge_label_index)
+        # decor_loss = model.cal_decorelation_loss(edge_label_index)
+        loss = alignment_loss + uniformity_loss
+        aver_align_loss += (alignment_loss)
+        aver_uni_loss += (uniformity_loss)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()   
+        aver_loss += (loss)
+    aver_loss /= total_batch
+    aver_align_loss /= total_batch
+    aver_uni_loss /= total_batch
+    return f"loss:{aver_loss:.3f},alignment:{aver_align_loss:.3f},uniformity:{aver_uni_loss:.3f}"
+
+def train_bpr_nrgcf(dataset,model,opt):
+    model = model
+    model.train()
+    S = utils.Fast_Sampling(dataset=dataset)
+    aver_loss = 0.
+    total_batch = len(S)
+    for edge_label_index in S:
+        pos_rank,neg_rank = model(edge_label_index)
+        bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
+        loss = bpr_loss + reg_loss
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        aver_loss += loss.cpu().item()
+    aver_loss /= total_batch
+    return f"average loss {aver_loss:5f}"
+
+def train_bpr_sgl(dataset,
+                  model:SGL,
+                  opt,
+                  edge_index1,
+                  edge_index2):
+    model = model
+    model.train()
+    S = utils.Fast_Sampling(dataset=dataset)
+    aver_loss = 0.
+    total_batch = len(S)
+    for edge_label_index in S:
+        pos_rank,neg_rank = model(edge_label_index)
+        bpr_loss = model.bpr_loss(pos_rank,neg_rank)
+        ssl_loss = model.ssl_loss(edge_index1,edge_index2,edge_label_index)
+        L2_reg = model.L2_reg(edge_label_index)
+        loss = bpr_loss + ssl_loss + L2_reg
+        opt.zero_grad()
+        loss.backward()
+        opt.step()    
+        aver_loss += (bpr_loss + ssl_loss + L2_reg)
+    aver_loss /= total_batch
+    return f"average loss {aver_loss:5f}"
+    # S = utils.Sampling(dataset,dataset.allPos)
+    # users = torch.LongTensor(S[:,0]).to(device)
+    # posItems = torch.LongTensor(S[:,1]).to(device)
+    # negItems = torch.LongTensor(S[:,2]).to(device)
+    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    # aver_loss = 0.
+    # for (batch_i,
+    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
+    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
+    #     pos_rank,neg_rank = model(edge_label_index)
+    #     bpr_loss = model.bpr_loss(pos_rank,neg_rank)
+    #     ssl_loss = model.ssl_loss(edge_index1,edge_index2,edge_label_index)
+    #     L2_reg = model.L2_reg(edge_label_index)
+    #     loss = bpr_loss + ssl_loss + L2_reg
+    #     opt.zero_grad()
+    #     loss.backward()
+    #     opt.step()
+    #     aver_loss += (bpr_loss + ssl_loss + L2_reg)
+    # aver_loss /= total_batch
+    # return f"average loss {aver_loss:5f}"
+
+def train_bpr_simgcl(dataset,
+                  model:SimGCL,
+                  opt):
+    model = model
+    model.train()
+    S = utils.Fast_Sampling(dataset=dataset)
+    aver_loss = 0.
+    total_batch = len(S)
+    for edge_label_index in S:
+        pos_rank,neg_rank = model(edge_label_index)
+        bpr_loss = model.bpr_loss(pos_rank,neg_rank)
+        ssl_loss = model.ssl_loss(edge_label_index)
+        L2_reg = model.L2_reg(edge_label_index)
+        loss = bpr_loss + ssl_loss + L2_reg
+        opt.zero_grad()
+        loss.backward()
+        opt.step()    
+        aver_loss += (bpr_loss + ssl_loss + L2_reg)
+    aver_loss /= total_batch
+    return f"average loss {aver_loss:5f}"
+    # S = utils.Sampling(dataset,dataset.allPos)
+    # users = torch.LongTensor(S[:,0]).to(device)
+    # posItems = torch.LongTensor(S[:,1]).to(device)
+    # negItems = torch.LongTensor(S[:,2]).to(device)
+    # users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    # total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    # aver_loss = 0.
+    # for (batch_i,
+    #      (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+    #          users,posItems,negItems,batch_size = config['bpr_batch_size'])):
+    #     edge_label_index = torch.stack([batch_user,batch_pos,batch_neg])
+    #     pos_rank,neg_rank = model(edge_label_index)
+    #     bpr_loss = model.bpr_loss(pos_rank,neg_rank)
+    #     ssl_loss = model.ssl_loss(edge_label_index)
+    #     L2_reg = model.L2_reg(edge_label_index)
+    #     loss = bpr_loss + ssl_loss + L2_reg
+    #     opt.zero_grad()
+    #     loss.backward()
+    #     opt.step()
+    #     aver_loss += (bpr_loss + ssl_loss + L2_reg)
+    # aver_loss /= total_batch
+    # return f"average loss {aver_loss:5f}"
+
+@torch.no_grad()
+def test(k_values:list,
+         model,
+         train_edge_index,
+         test_edge_index,
+         num_users,
+         ):
+    model.eval()
+    recall = {k: 0 for k in k_values}
+    ndcg = {k: 0 for k in k_values}
+    total_examples = 0
+    for start in range(0, num_users, 2048):
+        end = start + 2048
+        if end > num_users:
+            end = num_users
+        src_index=torch.arange(start,end).long().to(device)
+        logits = model.link_prediction(src_index=src_index,dst_index=None)
+
+        # Exclude training edges:
+        mask = ((train_edge_index[0] >= start) &
+                (train_edge_index[0] < end))
+        masked_interactions = train_edge_index[:,mask]
+        logits[masked_interactions[0] - start,masked_interactions[1]] = float('-inf')
+        # Generate ground truth matrix
+        ground_truth = torch.zeros_like(logits, dtype=torch.bool)
+        mask = ((test_edge_index[0] >= start) &
+                (test_edge_index[0] < end))
+        masked_interactions = test_edge_index[:,mask]
+        ground_truth[masked_interactions[0] - start,masked_interactions[1]] = True
+        node_count = degree(test_edge_index[0, mask] - start,
+                            num_nodes=logits.size(0))
+        topk_indices = logits.topk(max(k_values),dim=-1).indices
+        for k in k_values:
+            topk_index = topk_indices[:,:k]
+            isin_mat = ground_truth.gather(1, topk_index)
+            # Calculate recall
+            recall[k] += float((isin_mat.sum(dim=-1) / node_count.clamp(1e-6)).sum())
+            # Calculate NDCG
+            log_positions = torch.log2(torch.arange(2, k + 2, device=logits.device).float())
+            dcg = (isin_mat / log_positions).sum(dim=-1)
+            ideal_dcg = torch.zeros_like(dcg)
+            for i in range(len(dcg)):
+                ideal_dcg[i] = (1.0 / log_positions[:node_count[i].clamp(0, k).int()]).sum()
+            ndcg[k] += float((dcg / ideal_dcg.clamp(min=1e-6)).sum())
+
+        total_examples += int((node_count > 0).sum())
+
+    recall = {k: recall[k] / total_examples for k in k_values}
+    ndcg = {k: ndcg[k] / total_examples for k in k_values}
+
+    return recall,ndcg
+def BPR_train_MF(dataset,Recmodel,loss_class):
+    Recmodel = Recmodel
+    Recmodel.train()
+    bpr:utils.BPRLoss_MF = loss_class
+    with timer(name="Sample"):
+        S = utils.UniformSample_original(dataset)
+    users = torch.LongTensor(S[:,0])
+    posItems = torch.LongTensor(S[:,1])
+    negItems = torch.LongTensor(S[:,2])
+    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
+    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    aver_loss = 0.
+    for (batch_i,
+         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
+        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
+        aver_loss += cri
+    aver_loss /= total_batch
+    time_info = timer.dict()
+    timer.zero()
+    return f"average loss {aver_loss} -- {time_info}"
+
+def BPR_train_NeuCF(dataset,Recmodel,loss_class):
+    Recmodel = Recmodel
+    Recmodel.train()
+    bpr:utils.BCELoss = loss_class
+    with timer(name="Sample"):
+        S = utils.UniformSample_original(dataset)
+    users = torch.LongTensor(S[:,0])
+    posItems = torch.LongTensor(S[:,1])
+    negItems = torch.LongTensor(S[:,2])
+    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
+    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    aver_loss = 0.
+    for (batch_i,
+         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
+        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
+        aver_loss += cri
+    aver_loss /= total_batch
+    time_info = timer.dict()
+    timer.zero()
+    return f"average loss {aver_loss} -- {time_info}"
+
+def BPR_train_RGCF(dataset,Recmodel,loss_class):
+    Recmodel = Recmodel
+    Recmodel.train()
+    bpr:utils.BPRLoss_RGCF = loss_class
+    with timer(name="Sample"):
+        S = utils.UniformSample_original(dataset)
+    users = torch.LongTensor(S[:,0])
+    posItems = torch.LongTensor(S[:,1])
+    negItems = torch.LongTensor(S[:,2])
+    users,posItems,negItems = users.to(world.device),posItems.to(world.device),negItems.to(world.device)
+    users,posItems,negItems = utils.shuffle(users,posItems,negItems)
+    total_batch = len(users) // world.config['bpr_batch_size'] + 1 
+    aver_loss = 0.
+    for (batch_i,
+         (batch_user,batch_pos,batch_neg)) in enumerate(utils.minibatch(
+             users,posItems,negItems,batch_size = world.config['bpr_batch_size'])):
+        cri = bpr.stageOne(batch_user,batch_pos,batch_neg)
+        aver_loss += cri
+    aver_loss /= total_batch
+    time_info = timer.dict()
+    timer.zero()
+    return f"average loss {aver_loss} -- {time_info}"
 
 
 
-def hit(gt_item, pred_items):
-	if gt_item in pred_items:
-		return 1
-	return 0
+def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
+    Recmodel = recommend_model
+    Recmodel.train()
+    bpr:utils.BPRLoss1 = loss_class
+    
+    with timer(name="Sample"):
+        S = utils.UniformSample_original(dataset)
+    users = torch.Tensor(S[:, 0]).long()
+    posItems = torch.Tensor(S[:, 1]).long()
+    negItems = torch.Tensor(S[:, 2]).long()
 
+    users = users.to(world.device)
+    posItems = posItems.to(world.device)
+    negItems = negItems.to(world.device)
+    users, posItems, negItems = utils.shuffle(users, posItems, negItems)
+    total_batch = len(users) // world.config['bpr_batch_size'] + 1
+    aver_loss = 0.
+    for (batch_i,
+         (batch_users,
+          batch_pos,
+          batch_neg)) in enumerate(utils.minibatch(users,
+                                                   posItems,
+                                                   negItems,
+                                                   batch_size=world.config['bpr_batch_size'])):
+        cri = bpr.stageOne(batch_users, batch_pos, batch_neg)
+        aver_loss += cri
+        # if world.tensorboard:
+        #     w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
+    aver_loss = aver_loss / total_batch
+    time_info = timer.dict()
+    timer.zero()
+    return aver_loss , f"loss {aver_loss:.3f}-{time_info}"
 
-def ndcg(gt_item, pred_items):
-	if gt_item in pred_items:
-		index = pred_items.index(gt_item)
-		return np.reciprocal(np.log2(index+2))
-	return 0
+def trainer(dataset,rec_model,loss,epoch):
+    model = rec_model
+    model.train()
+    bpr:utils.BPRLoss1 = loss
+    S = utils.sampling(dataset)
+    users = S[0].long()
+    pos_items = S[1].long()
+    neg_items = S[2].long()
+    users = users.to(world.device)
+    pos_items = pos_items.to(world.device)
+    neg_items = neg_items.to(world.device)
+    total_batch = len(users) // world.config['bpr_batch_size'] + 1
+    for (batch_i,
+         (batch_users,
+          batch_pos,
+          batch_neg)) in enumerate(utils.minibatch(users,
+                                                   pos_items,
+                                                   neg_items,
+                                                   batch_size=world.config['bpr_batch_size'])):
+        cri = bpr.stageOne(batch_users, batch_pos, batch_neg)
+        aver_loss += cri
+        # if world.tensorboard:
+        #     w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
+    aver_loss = aver_loss / total_batch
+    return aver_loss , f"loss {aver_loss:.6f}"
 
-
-def RecallPrecision_ATk(test_data, r, k):
-    """
-    test_data should be a list? cause users may have different amount of pos items. shape (test_batch, k)
-    pred_data : shape (test_batch, k) NOTE: pred_data should be pre-sorted
-    k : top-k
-    """
-    right_pred = r[:, :k].sum(1)
-    precis_n = k
-    recall_n = np.array([len(test_data[i]) for i in range(len(test_data))])
-    recall = np.sum(right_pred / recall_n)
-    precis = np.sum(right_pred) / precis_n
-    return {'recall': recall, 'precision': precis}
-
-
-def MRRatK_r(r, k):
-	"""
-    Mean Reciprocal Rank
-    """
-	pred_data = r[:, :k]
-	scores = np.log2(1. / np.arange(1, k + 1))
-	pred_data = pred_data / scores
-	pred_data = pred_data.sum(1)
-	return np.sum(pred_data)
-
-
-def NDCGatK_r(test_data, r, k):
-    """
-    Normalized Discounted Cumulative Gain
-    rel_i = 1 or 0, so 2^{rel_i} - 1 = 1 or 0
-    """
-    assert len(r) == len(test_data)
-    pred_data = r[:, :k]
-
-    test_matrix = np.zeros((len(pred_data), k))
-    for i, items in enumerate(test_data):
-        length = k if k <= len(items) else len(items)
-        test_matrix[i, :length] = 1
-    max_r = test_matrix
-    idcg = np.sum(max_r * 1. / np.log2(np.arange(2, k + 2)), axis=1)
-    dcg = pred_data * (1. / np.log2(np.arange(2, k + 2)))
-    dcg = np.sum(dcg, axis=1)
-    idcg[idcg == 0.] = 1.
-    ndcg = dcg / idcg
-    ndcg[np.isnan(ndcg)] = 0.
-    return np.sum(ndcg)
-
-
-def test_one_batch(X, k):
+def test_one_batch(X):
     sorted_items = X[0].numpy()
     groundTrue = X[1]
-    r = getLabel(groundTrue, sorted_items)
-    ret = RecallPrecision_ATk(groundTrue, r, k)
-    return  ret['recall'], NDCGatK_r(groundTrue,r,k)
-
-def getLabel(test_data, pred_data):
-    r = []
-    for i in range(len(test_data)):
-        groundTrue = test_data[i]
-        predictTopK = pred_data[i]
-        pred = list(map(lambda x: x in groundTrue, predictTopK))
-        pred = np.array(pred).astype("float")
-        r.append(pred)
-    return np.array(r).astype('float')
+    r = utils.getLabel(groundTrue, sorted_items)
+    pre, recall, ndcg = [], [], []
+    for k in world.topks:
+        ret = utils.RecallPrecision_ATk(groundTrue, r, k)
+        pre.append(ret['precision'])
+        recall.append(ret['recall'])
+        ndcg.append(utils.NDCGatK_r(groundTrue, r, k))
+    return {'recall': np.array(recall),
+            'precision': np.array(pre),
+            'ndcg': np.array(ndcg)}
 
 
-def test(model:LightGCN, dataset:Loader,k:list):
-    topk = k
-    n_user = dataset.num_users
-    test_loader = dataset.test_loader
-    test_ground_truth_list = dataset.test_ground_truth_list
-    mask = dataset.mask
-    rating_list = []
-    groundTrue_list = []
+def Test(dataset, Recmodel, epoch, w=None, multicore=1, val=False):
+    u_batch_size = world.config['test_u_batch_size']
+    dataset: utils.BasicDataset
+    testDict: dict = dataset.testDict
+    valDict: dict = dataset.valDict
 
+    Recmodel: re_model.LightGCN
+    Recmodel = Recmodel.eval()
+    max_K = max(world.topks)
+    if multicore == 1:
+        pool = multiprocessing.Pool(CORES)
+    results = {'precision': np.zeros(len(world.topks)),
+               'recall': np.zeros(len(world.topks)),
+               'ndcg': np.zeros(len(world.topks)),
+               'precision_v': np.zeros(len(world.topks)),
+               'recall_v': np.zeros(len(world.topks)),
+               'ndcg_v': np.zeros(len(world.topks)),
+               }
     with torch.no_grad():
-        model.eval()
-        Recall_20, NDCG_20 = 0,0
-        Recall_50, NDCG_50 = 0,0
-        for k in topk:
-            for idx, batch_users in enumerate(test_loader):            
-                batch_users = batch_users.to(device)
-                rating = model.getUsersRating(batch_users)
-                rating = rating.cpu()
-                rating += mask[batch_users.cpu()]
-                _, rating_K = torch.topk(rating, k=k)
-                rating_list.append(rating_K)
-                groundTrue_list.append([test_ground_truth_list[u] for u in batch_users])
-            X = zip(rating_list, groundTrue_list)
-            for i,x in enumerate(X):
-                recall,ndcg = test_one_batch(x,k)
-                if k == 20:
-                      Recall_20 += recall
-                      NDCG_20 += ndcg
-                if k == 50:
-                      Recall_50 += recall
-                      NDCG_50 += ndcg
-        Recall_20 /= n_user
-        NDCG_20 /= n_user
-        Recall_50 /= n_user
-        NDCG_50 /= n_user
+        users = list(testDict.keys())
+        try:
+            assert u_batch_size <= len(users) / 10
+        except AssertionError:
+            print(f"test_u_batch_size is too big for this dataset, try a small one {len(users) // 10}")
+        users_list = []
+        rating_list = []
+        groundTrue_list = []
+        valid_list = []
+        # auc_record = []
+        # ratings = []
+        total_batch = len(users) // u_batch_size + 1
+        for batch_users in utils.minibatch(users, batch_size=u_batch_size):
+            allPos = dataset.getUserPosItems(batch_users)  # can speed up: self._allPos
+            val_list = [valDict[u] for u in batch_users]
+            groundTrue = [testDict[u] for u in batch_users]
+            batch_users_gpu = torch.Tensor(batch_users).long()
+            batch_users_gpu = batch_users_gpu.to(world.device)
 
-    return Recall_20, NDCG_20,Recall_50,NDCG_50
+            rating = Recmodel.link_prediction(batch_users_gpu,None)   
+            # rating = rating.cpu()
+            exclude_index = []  
+            exclude_items = []
+            # posivite instances
+            for range_i, items in enumerate(allPos):
+                exclude_index.extend([range_i] * len(items))
+                exclude_items.extend(items)
+
+            rating[exclude_index, exclude_items] = -(1 << 10)
+
+            _, rating_K = torch.topk(rating, k=max_K)
+            del rating
+            users_list.append(batch_users)
+            rating_list.append(rating_K.cpu())
+            valid_list.append(val_list)
+            groundTrue_list.append(groundTrue)
+        assert total_batch == len(users_list)
+        X = zip(rating_list, groundTrue_list)
+        X_val = zip(rating_list,valid_list)
+        pre_results = pool.map(test_one_batch, X)
+        val_results = pool.map(test_one_batch,X_val)  
+        for result in pre_results:
+            results['recall'] += result['recall']
+            # results['precision'] += result['precision']
+            results['ndcg'] += result['ndcg']
+        results['recall'] /= float(len(users))
+        # results['precision'] /= float(len(users))
+        results['ndcg'] /= float(len(users))
+        for result in val_results:
+            results['recall_v'] += result['recall']
+            # results['precision_v'] += result['precision']
+            results['ndcg_v'] += result['ndcg']
+        results['recall_v'] /= float(len(users))
+        # results['precision_v'] /= float(len(users))
+        results['ndcg_v'] /= float(len(users))
+        if multicore == 1:
+            pool.close()
+
+        return results
+    
+def Valid(dataset, Recmodel, epoch, w=None, multicore=1, val=False):
+    u_batch_size = world.config['test_u_batch_size']
+    dataset: utils.BasicDataset
+    # testDict: dict = dataset.testDict
+    valDict: dict = dataset.valDict
+
+    Recmodel: re_model.LightGCN
+    Recmodel = Recmodel.eval()
+    max_K = max(world.topks)
+    if multicore == 1:
+        pool = multiprocessing.Pool(CORES)
+    results = {'precision': np.zeros(len(world.topks)),
+               'recall': np.zeros(len(world.topks)),
+               'ndcg': np.zeros(len(world.topks))}
+    with torch.no_grad():
+        users = list(valDict.keys())
+        try:
+            assert u_batch_size <= len(users) / 10
+        except AssertionError:
+            print(f"test_u_batch_size is too big for this dataset, try a small one {len(users) // 10}")
+        users_list = []
+        rating_list = []
+        groundTrue_list = []
+        # auc_record = []
+        # ratings = []
+        total_batch = len(users) // u_batch_size + 1
+        for batch_users in utils.minibatch(users, batch_size=u_batch_size):
+            allPos = dataset.getUserPosItems(batch_users)  # can speed up: self._allPos
+            groundTrue = [valDict[u] for u in batch_users]
+            batch_users_gpu = torch.Tensor(batch_users).long()
+            batch_users_gpu = batch_users_gpu.to(world.device)
+
+            rating = Recmodel.getUsersRating(batch_users_gpu)   
+            # rating = rating.cpu()
+            exclude_index = []  
+            exclude_items = []
+            # posivite instances
+            for range_i, items in enumerate(allPos):
+                exclude_index.extend([range_i] * len(items))
+                exclude_items.extend(items)
+
+            rating[exclude_index, exclude_items] = -(1 << 10)
+
+            _, rating_K = torch.topk(rating, k=max_K)
+            # rating = rating.cpu().numpy()
+            del rating
+            users_list.append(batch_users)
+            rating_list.append(rating_K.cpu())
+            groundTrue_list.append(groundTrue)
+        assert total_batch == len(users_list)
+        X = zip(rating_list, groundTrue_list)
+        if multicore == 1:
+            pre_results = pool.map(test_one_batch, X)
+        else:
+            pre_results = []
+            for x in X:
+                pre_results.append(test_one_batch(x))
+                
+        for result in pre_results:
+            results['recall'] += result['recall']
+            results['precision'] += result['precision']
+            results['ndcg'] += result['ndcg']
+        results['recall'] /= float(len(users))
+        results['precision'] /= float(len(users))
+        results['ndcg'] /= float(len(users))
+        # results['auc'] = np.mean(auc_record)
+        if multicore == 1:
+            pool.close()
+
+        return results
+def Recall_K(ground_truth,r,k):
+    num_correct_pred = torch.sum(r,dim=-1)
+    user_num_liked = Tensor([len(ground_truth[i]) for i in range(len(ground_truth))])
+    recall = torch.mean(num_correct_pred / user_num_liked)
+    return recall.item()
+
+def NDCG_K(ground_truth,r,k):
+    assert len(r) == len(ground_truth)
+    test_matrix = torch.zeros((len(r),k))
+    for i,item in enumerate(ground_truth):
+        length = min(len(item),k)
+        test_matrix[i,:length] = 1
+    max_r = test_matrix
+    idcg = torch.sum(max_r * 1. / torch.log2(torch.arange(2,k + 2)),axis = 1)
+    dcg = r * (1. / torch.log2(torch.arange(2, k + 2)))
+    dcg = torch.sum(dcg, axis=1)
+    idcg[idcg == 0.] = 1.
+    ndcg = dcg / idcg
+    ndcg[torch.isnan(ndcg)] = 0.
+    return torch.mean(ndcg).item()
+
+def get_user_positive_items(edge_index):
+    user_pos_items = {}
+    for i in range(edge_index.shape[1]):
+        user = edge_index[0][i].item()
+        item = edge_index[1][i].item()
+        if user not in user_pos_items:
+            user_pos_items[user] = []
+        user_pos_items[user].append(item)
+    return user_pos_items
+
+def get_metrics(model,edge_index,exclude_edge_index,k):
+    # user_embedding = np.array(model.user_emb.weight.cpu().detach().numpy())
+    # item_embedding = np.array(model.item_emb.weight.cpu().detach().numpy())
+    # rating = torch.tensor(np.matmul(user_embedding,item_embedding.T))
+
+    # user_embedding = model.user_emb.weight
+    # item_embedding = model.item_emb.weight
+    # rating = torch.matmul(user_embedding,item_embedding.T)
+    e_index = model.dataset.getSparseGraph().to(world.device)
+    user_embedding,_,item_embedding,_ = model.forward(e_index)
+    rating = torch.matmul(user_embedding,item_embedding.T)
+    user_pos_items = get_user_positive_items(exclude_edge_index)
+    exclude_user = []
+    exclude_item = []
+    for user,items in user_pos_items.items():
+        exclude_user.extend([user]*len(items))
+        exclude_item.extend(items)
+    rating[exclude_user,exclude_item] = -(1 << 10)
+    _, top_k_items = torch.topk(rating,k=k)
+
+    users = edge_index[0].unique()
+    test_user_pos_item = get_user_positive_items(edge_index)
+    test_user_pos_item_list = [test_user_pos_item[user.item()] for user in users]
+
+    r = []
+    for user in users:
+        ground_truth_items = test_user_pos_item[user.item()]
+        label = list(map(lambda x : x in ground_truth_items,top_k_items[user]))
+        r.append(label)
+    r = Tensor(np.array(r).astype('float'))
+
+    recall = Recall_K(test_user_pos_item_list,r,k)
+    ndcg = NDCG_K(test_user_pos_item_list,r,k)
+
+    return recall,ndcg
