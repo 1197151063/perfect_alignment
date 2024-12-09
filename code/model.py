@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import world
 import utils
-
+from torch_geometric.utils import degree
 config = world.config
 device = world.device
 """
@@ -18,6 +18,15 @@ Already implemented : [MF-BPR,NGCF,LightGCN,DGCF,GTN,RGCF,Ours]
 """
 General GNN based RecModel
 """
+class Embeddingligner(nn.Module):
+    def __init__(self, embedding_dim1, embedding_dim2):
+        super(Embeddingligner, self).__init__()
+        self.linear = nn.Linear(embedding_dim2, embedding_dim1, bias=False)
+    
+    def forward(self, embedding2):
+        mapped_embedding2 = self.linear(embedding2)
+        return mapped_embedding2
+    
 class RecModel(MessagePassing):
     def __init__(self,
                  num_users:int,
@@ -31,6 +40,10 @@ class RecModel(MessagePassing):
         self.config = config
         self.f = nn.Sigmoid()
 
+    def get_sparse_heter(self,edge_index,val):
+        num_nodes = edge_index[0].max()+1
+        return SparseTensor(row=edge_index[0],col=edge_index[1],
+                            value=val,sparse_sizes=(num_nodes,num_nodes))
 
     def get_sparse_graph(self,
                          edge_index,
@@ -145,6 +158,8 @@ class LightGCN(RecModel):
                  num_users:int,
                  num_items:int,
                  edge_index:LongTensor,
+                 knn_ind,
+                 value,
                  config):
         super().__init__(
             num_users=num_users,
@@ -156,9 +171,16 @@ class LightGCN(RecModel):
                                      embedding_dim=config['latent_dim_rec'])
         self.item_emb = nn.Embedding(num_embeddings=num_items,
                                      embedding_dim=config['latent_dim_rec'])
-        nn.init.normal_(self.user_emb.weight,std=0.1)
-        nn.init.normal_(self.item_emb.weight,std=0.1)
+        self.linear = Embeddingligner(embedding_dim1=config['latent_dim_rec'],embedding_dim2=config['latent_dim_rec'])
+        # self.init_weight_uniformal(0.1)
+        self.init_weight(1e-4)
+        self.knn_ind = knn_ind
+        self.val = value
         self.K = config['K']
+        self.sp_edge_index = self.graph_sparsify(edge_index=edge_index)
+        self.sp_edge_index = self.get_sparse_graph(self.sp_edge_index)
+        print(self.sp_edge_index)
+        self.sp_edge_index = gcn_norm(self.sp_edge_index)
         edge_index = self.get_sparse_graph(edge_index=edge_index,use_value=False,value=None)
         self.edge_index = gcn_norm(edge_index)
         self.alpha= 1./ (1 + self.K)
@@ -169,6 +191,56 @@ class LightGCN(RecModel):
         print('Go LightGCN')
         print(f"params settings: \n emb_size:{config['latent_dim_rec']}\n L2 reg:{config['decay']}\n layer:{self.K}")
 
+    def init_weight(self,init_weight):
+        nn.init.normal_(self.user_emb.weight,std=init_weight)
+        nn.init.normal_(self.item_emb.weight,std=init_weight)
+    def init_weight_uniformal(self,init_weight):
+        nn.init.xavier_uniform_(self.user_emb.weight,gain=init_weight)
+        nn.init.xavier_uniform_(self.item_emb.weight,gain=init_weight)
+    def graph_sparsify(self,edge_index):
+        user_d = degree(edge_index[0], num_nodes=self.num_users)
+        num_h_users = int(self.num_users * 0.2)
+        h_users = torch.topk(user_d, num_h_users).indices
+        mask = torch.isin(edge_index[0], h_users)
+        head_user_edges = edge_index[:, mask]
+        other_edges = edge_index[:, ~mask]
+        num_edges_to_drop = int(0.1 * edge_index.size(1))
+        if num_edges_to_drop > 0:
+            perm = torch.randperm(head_user_edges.size(1))
+            drop_indices = perm[:num_edges_to_drop]
+            keep_mask = torch.ones(head_user_edges.size(1), dtype=torch.bool, device=head_user_edges.device)
+            keep_mask[drop_indices] = False
+            head_user_edges = head_user_edges[:, keep_mask]
+        new_edge_index = torch.cat((other_edges, head_user_edges), dim=1)
+            
+        return new_edge_index
+    def InfoNCE_I_ALL(self,view1,view2,pos,t):
+        view1 = F.normalize(view1,dim=1)
+        view2 = F.normalize(view2,dim=1)
+        view1_pos = view1[pos]
+        view2_pos = view2[pos]
+        info_pos = (view1_pos * view2_pos).sum(dim=1)/ t
+        info_pos_score = torch.exp(info_pos)
+        info_neg = (view1_pos @ view2.t())/ t
+        info_neg = torch.exp(info_neg)
+        info_neg = torch.sum(info_neg,dim=1,keepdim=True)
+        info_neg = info_neg.T
+        ssl_logits = -torch.log(info_pos_score / info_neg).mean()
+        return ssl_logits
+    
+    def InfoNCE_U_ALL(self,view1,view2,u_idx,pos,t):
+        view1 = F.normalize(view1,dim=1)
+        view2 = F.normalize(view2,dim=1)
+        view1_pos = view1[u_idx]
+        view2_pos = view2[pos]
+        info_pos = (view1_pos * view2_pos).sum(dim=1)/ t
+        info_pos_score = torch.exp(info_pos)
+        info_neg = (view1_pos @ view2.t())/ t
+        info_neg = torch.exp(info_neg)
+        info_neg = torch.sum(info_neg,dim=1,keepdim=True)
+        info_neg = info_neg.T
+        ssl_logits = -torch.log(info_pos_score / info_neg).mean()
+        return ssl_logits
     def get_embedding(self):
         x_u=self.user_emb.weight
         x_i=self.item_emb.weight
@@ -186,6 +258,67 @@ class LightGCN(RecModel):
         item_pos = items[edge_label_index[1]]
         item_neg = items[edge_label_index[2]]
         return ((user_emb * item_pos).sum(dim=-1) - (user_emb * item_neg).sum(dim=-1)).sigmoid()
+    
+    def item_alignment(self,items):
+        item_emb = self.item_emb.weight
+        knn_neighbour = self.knn_ind[items] #[batch_size * k]
+        # sim_score = self.val[items]
+        user_emb = item_emb[items].unsqueeze(1)
+        item_emb_pos = item_emb[knn_neighbour] 
+        loss =  (user_emb * item_emb_pos).sum(dim=-1)
+        return -loss.sigmoid().log().sum()
+    
+    def item_constraint_loss(self,edge_label_index):
+        pos = edge_label_index[1]
+        i_loss = self.item_alignment(pos)
+        return  1e-3 * i_loss
+    
+    def get_embedding_with_edge_index(self,edge_index):
+        x_u=self.user_emb.weight
+        x_i=self.item_emb.weight
+        x=torch.cat([x_u,x_i])
+        out = x * self.alpha[0]
+        for i in range(self.K):
+            x = self.propagate(edge_index=edge_index,x=x)
+            out = out + x * self.alpha[i + 1]
+        return out
+
+    def hn_loss(self,edge_label_index):
+        users,items,_ = edge_label_index
+        emb1 = self.get_embedding()
+        emb2 = self.get_embedding_with_edge_index(self.sp_edge_index)
+        # # emb2 = self.linear(emb2)
+        x1,y1 = torch.split(emb1,[self.num_users,self.num_items])
+        x2,y2 = torch.split(emb2,[self.num_users,self.num_items])
+        # x1,y1 = x1[users],y1[items]
+        # x2,y2 = x2[users],y2[items]
+        # x1, y1 = F.normalize(x1, dim=-1), F.normalize(y1, dim=-1)
+        # x2, y2 = F.normalize(x2, dim=-1), F.normalize(y2,dim=-1)
+        # return ((x1 - y2).norm(dim=1).pow(2).mean() + (x2 - y1).norm(dim=1).pow(2).mean()) * 1/2
+        a1 = self.InfoNCE_U_ALL(x1,y2,users,items,0.1)
+        a2 = self.InfoNCE_U_ALL(x2,y1,users,items,0.1)
+        return 0.1 * (a1 + a2)
+    
+    def uniformity_loss(self,edge_label_index):
+        out = self.get_embedding_with_edge_index(self.sp_edge_index)
+        x_u,x_i = torch.split(out,[self.num_users,self.num_items])
+        batch_x_u,batch_x_i = x_u[edge_label_index[0]],x_i[edge_label_index[1]]
+        return  1* (self.uniformity(batch_x_u) + self.uniformity(batch_x_i))
+
+    def uniformity(self,x, t=2):
+        x = F.normalize(x, dim=-1)
+        return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+    
+    def forward(self,
+                    edge_label_index:Tensor):
+            out = self.get_embedding()
+            out_u,out_i = torch.split(out,[self.num_users,self.num_items])
+           
+            out_src = out_u[edge_label_index[0]]
+            out_dst = out_i[edge_label_index[1]]
+            out_dst_neg = out_i[edge_label_index[2]]
+            return (out_src * out_dst).sum(dim=-1),(out_src * out_dst_neg).sum(dim=-1)
+        
 
 class CenNorm(RecModel):
     def __init__(self,
@@ -268,8 +401,8 @@ class SGL(RecModel):
                  num_items:int,
                  edge_index:LongTensor,
                  config,
-                 pre_users=None,
-                 pre_items=None):
+                 knn_ind,
+                 val):
         super().__init__(num_users=num_users,
                          num_items=num_items,
                          edge_index=edge_index,
@@ -283,8 +416,8 @@ class SGL(RecModel):
                                      embedding_dim=config['latent_dim_rec'])
         self.item_emb = nn.Embedding(num_embeddings=num_items,
                                      embedding_dim=config['latent_dim_rec'])
-        self.pre_users = pre_users
-        self.pre_items = pre_items
+        self.knn_ind = knn_ind
+        self.val = val
         #SGL use normal distribution of 0.01
         nn.init.xavier_normal_(self.user_emb.weight,0.01)
         nn.init.xavier_normal_(self.item_emb.weight,0.01)
@@ -379,7 +512,19 @@ class SGL(RecModel):
                          negEmb0.norm(2).pow(2)) / edge_label_index.size(1)
         regularization = self.config['decay'] * reg_loss
         return regularization
+    def item_alignment(self,users,items):
+        knn_neighbour = self.knn_ind[items] #[batch_size * k]
+        user_emb = self.user_emb.weight[users].unsqueeze(1)
+        item_emb = self.item_emb.weight[knn_neighbour] 
+        sim_score = self.val[items]
+        loss = -sim_score * (user_emb * item_emb).sum(dim=-1).sigmoid().log()
+        return loss.sum()
     
+    def item_constraint_loss(self,edge_label_index):
+        users = edge_label_index[0]
+        pos = edge_label_index[1]
+        i_loss = self.item_alignment(users,pos)
+        return  1e-3 * i_loss    
 class SimGCL(RecModel):
     def __init__(self,
                  num_users:int,
@@ -628,7 +773,6 @@ class RGCF(MessagePassing):
         ttl_score = torch.matmul(norm_emb1, norm_all_emb.transpose(0, 1))
         pos_score = torch.exp(pos_score / self.tau)
         ttl_score = torch.exp(ttl_score / self.tau).sum(dim=1)
-
         ssl_loss = -torch.log(pos_score / ttl_score).sum()
         return ssl_loss
     

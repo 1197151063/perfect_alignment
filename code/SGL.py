@@ -1,8 +1,8 @@
 import world
-from NRGCF_Pytorch.code.model import SGL
-from NRGCF_Pytorch.code.dataloader import Loader
+from model import SGL
+from dataloader import Loader
 import torch
-from NRGCF_Pytorch.code.procedure import train_bpr_sgl,test
+from procedure import train_bpr_sgl,test
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 import utils
 from torch_geometric.utils import dropout_edge
@@ -12,12 +12,20 @@ config = world.config
 dataset = Loader()
 train_edge_index = dataset.train_edge_index.to(device)
 test_edge_index = dataset.test_edge_index.to(device)
+value = torch.load('i-i-value.pt')
+knn_index = torch.load('i-i-index.pt')
+
+value = value[:,1:].to(device)
+value[value < 0.1] = 0
+knn_index = knn_index[:,1:].to(device)
 num_users = dataset.num_users
 num_items = dataset.num_items
 model = SGL(num_users=num_users,
                  num_items=num_items,
                  edge_index=train_edge_index,
-                 config=config).to(device)
+                 config=config,
+                 knn_ind=knn_index,
+                 val=value).to(device)
 opt = torch.optim.Adam(params=model.parameters(),lr=config['lr'])
 best = 0.
 patience = 0.

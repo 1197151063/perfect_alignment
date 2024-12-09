@@ -31,20 +31,15 @@ config['test_u_batch_size'] = args.testbatch
 config['multicore'] = args.multicore
 config['lr'] = args.lr
 config['decay'] = args.decay
-config['pretrain'] = args.pretrain
 config['A_split'] = False
 config['bigdata'] = False
 config['args'] = args
 config['dataset'] = args.dataset
 config['epochs'] = args.epochs
 config['lambda2'] = args.lambda2
-config['add_noise'] = args.add_noise
-config['noise_rate'] = args.noise_rate
 config['lightGCN_n_layers']= args.layer
 config['model']=args.model 
 config['seed']=args.seed
-config['norm_weight']=args.norm_weight
-config['normal_weight']=args.normal_weight
 config['lambda1'] = 32
 config['beta'] = args.pruning
 config['ssl_tmp'] = args.ssl_tmp
@@ -63,11 +58,8 @@ dataset = args.dataset
 model_name = args.model
 
 TRAIN_epochs = args.epochs
-LOAD = args.load
 PATH = args.path
 topks = [20,50]
-tensorboard = args.tensorboard
-comment = args.comment
 # let pandas shut up
 from warnings import simplefilter
 

@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from random import shuffle,choice
 device = world.device
 config = world.config
-save_file_name = 'SGL' + '==' + str(config['au']) + ' ' +'dataset'+'=='+config['dataset'] + '_' + str(config['noise_rate'])+'.pth'
+
 
 def next_batch_pairwise(dataset):
     batch_size = config['bpr_batch_size']

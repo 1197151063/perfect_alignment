@@ -21,11 +21,18 @@ def train_bpr(dataset,model:LightGCN,opt):
     aver_loss = 0.
     total_batch = len(S)
     for edge_label_index in S:
+        opt.zero_grad()
+
         pos_rank,neg_rank = model(edge_label_index)
         bpr_loss,reg_loss = model.recommendation_loss(pos_rank,neg_rank,edge_label_index)
-        loss = bpr_loss + reg_loss
-        opt.zero_grad()
+        i_loss = model.item_constraint_loss(edge_label_index)
+        hn_loss =  model.hn_loss(edge_label_index)
+        loss = bpr_loss + reg_loss + i_loss + hn_loss
         loss.backward()
+
+        # uni_loss = model.uniformity_loss(edge_label_index)
+        # loss_1 = hn_loss+uni_loss
+        # loss_1.backward()
         opt.step()   
         aver_loss += (loss)
     aver_loss /= total_batch
@@ -71,7 +78,8 @@ def train_bpr_sgl(dataset,
         bpr_loss = model.bpr_loss(pos_rank,neg_rank)
         ssl_loss = model.ssl_loss(edge_index1,edge_index2,edge_label_index)
         L2_reg = model.L2_reg(edge_label_index)
-        loss = bpr_loss + ssl_loss + L2_reg
+        i_i_cons = model.item_constraint_loss(edge_label_index)
+        loss = bpr_loss + ssl_loss + L2_reg + i_i_cons
         opt.zero_grad()
         loss.backward()
         opt.step()    
